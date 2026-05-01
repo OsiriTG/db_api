@@ -1,0 +1,5 @@
+psycopg
+fastapi
+uvicorn
+dotenv
+aiogram
