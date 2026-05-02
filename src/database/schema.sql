@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE(username)
 );
 
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_owner_id ON users(owner_id);
 
 COMMIT;
