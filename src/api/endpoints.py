@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException, Header
 from aiogram.types import User, Chat
 
 from pydantic import BaseModel, Field
-from typing import Optional, Any
+from typing import Optional
+from datetime import datetime
 
 from config import *
 from utils import *
@@ -16,18 +17,23 @@ class KeyCreateRequest(BaseModel):
 
 class TelegramUserIn(BaseModel):
     id: int
+    is_bot: Optional[bool] = False
     first_name: str
     last_name: Optional[str] = None
     username: Optional[str] = None
     language_code: Optional[str] = None
+    is_premium: Optional[bool] = False
 
 class TelegramChatIn(BaseModel):
     id: int
     type: str
     title: str
     username: Optional[str] = None
+    first_name: str
+    last_name: Optional[str] = None
+    shifted_id: int
 
-class UserUpsertRequest(BaseModel):
+class UserCreateRequest(BaseModel):
     user: Optional[TelegramUserIn] = None
     chat: Optional[TelegramChatIn] = None
     owner_id: Optional[int] = None
@@ -36,7 +42,7 @@ class UserUpsertRequest(BaseModel):
 
 @router.post("/key_mk")
 async def key_mk(request: KeyCreateRequest, api_key: str = Header(..., alias="X-API-Key")):
-    sender_key_data = await get_key_and_check_permission(api_key)
+    sender_key_data = await get_key_and_check_permission(api_key, "c")
 
     if not sender_key_data.can_create_api_keys:
         raise HTTPException(status_code=403, detail="У Вас нет прав создавать новые API-ключи")
@@ -59,9 +65,14 @@ async def key_mk(request: KeyCreateRequest, api_key: str = Header(..., alias="X-
         "date_reg": new_key.date_reg
     }
 
-@router.get("/")
-async def key_get(api_key: str = Header(..., alias="X-API-Key")):
-    key_data = await get_key_and_check_permission(api_key)
+@router.get("/{target_api_key}")
+async def key_get(target_api_key: str, sender_api_key: str = Header(..., alias="X-API-Key")):
+    await get_key_and_check_permission(sender_api_key, "r")
+
+    key_data = await db.key_get(target_api_key)
+    if key_data is None:
+        raise HTTPException(status_code=404, detail="Ключ не найден")
+
     return {
         "is_key_exist": True,
         "permissions": key_data.permissions,
@@ -71,44 +82,65 @@ async def key_get(api_key: str = Header(..., alias="X-API-Key")):
 
 
 @router.post("/user_mk")
-async def user_mk(request: UserUpsertRequest, api_key: str = Header(..., alias="X-API-Key")):
+async def user_mk(request: UserCreateRequest, api_key: str = Header(..., alias="X-API-Key")):
     await get_key_and_check_permission(api_key, "cu")
 
     tg_user = User(**request.user.model_dump()) if request.user else None
     tg_chat = Chat(**request.chat.model_dump()) if request.chat else None
 
-    result = await db.user_mk(
+    user = await db.user_mk(
         user=tg_user,
         chat=tg_chat,
         owner_id=request.owner_id,
         zoneinfo=request.zoneinfo
     )
-    if result is None:
-        raise HTTPException(status_code=500, detail="Непредвиденная ошибка (БД)")
-        
-    return {"status": True, "date_reg_db": result.date_reg_db}
+    if user is None:
+        raise HTTPException(status_code=500, detail="Непредвиденная ошибка (БД). Попробуйте позже")
+
+    return {
+        "id": user.id,
+        "is_bot": user.is_bot,
+        "type": user.type,
+        "title": user.title,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "username": user.username,
+        "language_code": user.language_code,
+        "is_premium": user.is_premium,
+        "shifted_id": user.shifted_id,
+        "full_name": user.full_name,
+        "mention": user.mention,
+        "oid": user.oid,
+        "owner_id": user.owner_id,
+        "zoneinfo": user.zoneinfo,
+        "date_reg_db": user.date_reg_db
+    }
 
 @router.get("/users/{user_id}")
 async def user_get(user_id: int, api_key: str = Header(..., alias="X-API-Key")):
     await get_key_and_check_permission(api_key, "r")
 
-    user_data = await db.user_get(id=user_id)
-    if user_data is None:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    user = await db.user_get(id=user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Не удалось найти пользователя")
 
     return {
-        "id": user_data.id,
-        "type": user_data.type,
-        "title": user_data.title,
-        "first_name": user_data.first_name,
-        "last_name": user_data.last_name,
-        "username": user_data.username,
-        "language_code": user_data.language_code,
-        "owner_id": user_data.owner_id,
-        "zoneinfo": user_data.zoneinfo,
-        "date_reg_db": user_data.date_reg_db,
-        "full_name": await user_data.full_name(),
-        "mention": await user_data.mention()
+        "id": user.id,
+        "is_bot": user.is_bot,
+        "type": user.type,
+        "title": user.title,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "username": user.username,
+        "language_code": user.language_code,
+        "is_premium": user.is_premium,
+        "shifted_id": user.shifted_id,
+        "full_name": user.full_name,
+        "mention": user.mention,
+        "oid": user.oid,
+        "owner_id": user.owner_id,
+        "zoneinfo": user.zoneinfo,
+        "date_reg_db": user.date_reg_db
     }
 
 @router.delete("/user_rm")
@@ -116,7 +148,9 @@ async def user_rm(user_id: int, api_key: str = Header(..., alias="X-API-Key")):
     await get_key_and_check_permission(api_key, "d")
     
     result = await db.user_rm(user_id)
+    if result is None:
+        raise HTTPException(status_code=500, detail="Непредвиденная ошибка (БД). Попробуйте позже")
     if not result:
-        raise HTTPException(status_code=404, detail="Пользователь не найден в базе")
-        
-    return {"status": True, "id": user_id}
+        raise HTTPException(status_code=404, detail="Такого пользователя не существует")
+
+    return {"status": True, "id": user_id, "timestamp": datetime.now().timestamp()}

@@ -4,45 +4,53 @@ from aiogram.types import User, Chat
 
 from string import ascii_letters, digits
 from secrets import choice
-
 from datetime import datetime
 
 import config
 
-characters = ascii_letters + digits + "_"
+base64 = ascii_letters + digits + "_" + "-"
 
 nonpermissions_letters = 'abefghijklmnopqstvwxyz'
 nonpermissions_punctuation = punctuation = r"""!"#$%&'()*+,./:;<=>?@[\]^_`{|}~ """
+
 
 class OKey(): # Окей :)
     def __init__(self, **kwargs):
         self.key: str = kwargs['key']
         self.permissions: str = kwargs['permissions']
         self.can_create_api_keys: bool = kwargs['can_create_api_keys']
+        self.owner_id: int | None = kwargs['owner_id']
         self.date_reg: datetime = kwargs['date_reg']
 
 class OUser():
     def __init__(self, **kwargs):
         self.id: int = kwargs['id']
+        self.is_bot: bool = kwargs['is_bot']
         self.type: str = kwargs['type']
-        self.title: str = kwargs['title']
-        self.first_name: str = kwargs['first_name']
-        self.last_name: str = kwargs['last_name']
-        self.username: str = kwargs['username']
-        self.language_code: str = kwargs['language_code']
+        self.title: str | None = kwargs['title']
+        self.first_name: str | None = kwargs['first_name']
+        self.last_name: str | None = kwargs['last_name']
+        self.username: str | None = kwargs['username']
+        self.language_code: str | None = kwargs['language_code']
+        self.is_premium: bool = kwargs['is_premium']
+
+        self.shifted_id: int = kwargs['shifted_id']
+        if self.first_name and self.last_name:
+            self.full_name: str | None = self.first_name + " " + self.last_name
+        elif self.first_name:
+            self.full_name: str | None = self.first_name
+        else:
+            self.full_name: str | None = None
+        if self.type == "private":
+            self.mention: str = f"<a href='https://t.me/{self.username}'>{self.first_name}</a>" if self.username else f"<a href='tg://openmessage?user_id={self.id}'>{self.first_name}</a>"
+        else:
+            self.mention: str = f"<a href='https://t.me/{self.username}'>{self.title}</a>" if self.username else self.title
+
+        self.oid: str = kwargs['oid']
         self.owner_id: int = kwargs['owner_id']
         self.zoneinfo: str = kwargs['zoneinfo']
         self.date_reg_db: datetime = kwargs['date_reg_db']
 
-    async def full_name(self):
-        if self.type == "private":
-            return self.first_name + " " + self.last_name
-        self.title
-
-    async def mention(self):
-        if self.type == "private":
-            return f"<a href='https://t.me/{self.username}'>{self.full_name()}</a>" if self.username else f"<a href='tg://openmessage?user_id={str(self.id).removeprefix("-100")}'>{self.full_name()}</a>"
-        return self.title
 
 class Database():
     def __init__(self):
@@ -58,31 +66,33 @@ class Database():
             row_factory = dict_row
         )
 
-    async def key_mk(self, permissions: str = "-r--", can_create_api_keys: bool = False) -> OKey:
-        if len(permissions) != 4:
-            raise ValueError("Длинна прав должна быть 4 символа")
-        if not set(permissions.casefold()).issubset(set("crud-")):
-            raise ValueError("Неверный формат прав. Используйте только 'c','r','u','d' или '-', например '-r--'")
+    async def key_mk(self, permissions: str = "-r--", can_create_api_keys: bool = False, owner_id: int = None) -> OKey:
+        if len(permissions) != 4 or not set(permissions.casefold()).issubset(set("crud-")):
+            return None
         if can_create_api_keys is None:
             can_create_api_keys = False
 
         try:
             async with self.conn.cursor() as cur:
                 while True:
-                    key = "".join(choice(characters) for _ in range(config.API_KEYS_LENGTH))
+                    key = "".join(choice(base64) for _ in range(config.API_KEYS_LENGTH))
                     await cur.execute("SELECT 1 FROM api_keys WHERE key = %s", (key,))
                     if not await cur.fetchone():
                         break
 
+                await cur.execute("SELECT 1 FROM users WHERE id = %s", (owner_id,))
+                if not await cur.fetchone():
+                    owner_id = None
+
                 await cur.execute(
-                    """INSERT INTO api_keys ("key", permissions, can_create_api_keys) VALUES (%s, %s, %s) RETURNING *""",
-                    (key, permissions, can_create_api_keys)
+                    """INSERT INTO api_keys ("key", permissions, can_create_api_keys, owner_id) VALUES (%s, %s, %s, %s) RETURNING *""",
+                    (key, permissions, can_create_api_keys, owner_id)
                 )
                 result = await cur.fetchone()
                 await self.conn.commit()
                 return OKey(**result)
         except Exception as e:
-            print(f"database: mk_key(): {e}")
+            print(f"database: key_mk(): {e}")
             await self.conn.rollback()
             return None
 
@@ -95,30 +105,39 @@ class Database():
                     return None
                 return OKey(**result)
         except Exception as e:
-            print(f"database: get_key(): {e}")
+            print(f"database: key_get(): {e}")
             return None
 
 
     async def user_mk(self, user: User = None, chat: Chat = None, owner_id: int = None, zoneinfo: str = None) -> OUser:
         if bool(user) == bool(chat):
-            raise ValueError("Нужно передать либо user, либо chat")
+            return None
+
+        oid = None
 
         if user:
             obj_id = user.id
+            is_bot = user.is_bot
             obj_type = "private"
             title = None
             first_name = user.first_name
             last_name = user.last_name
             username = user.username
             language_code = user.language_code
+            is_premium = user.is_premium
+            shifted_id = obj_id
+            owner_id = None
         else:
             obj_id = chat.id
+            is_bot = False
             obj_type = chat.type
             title = chat.title
-            first_name = None
-            last_name = None
+            first_name = chat.first_name
+            last_name = chat.last_name
             username = chat.username
             language_code = None
+            is_premium = False
+            shifted_id = chat.shifted_id
 
         try:
             async with self.conn.cursor() as cur:
@@ -128,19 +147,37 @@ class Database():
                         (username, obj_id)
                     )
 
+                await cur.execute("SELECT oid FROM users WHERE id = %s", (owner_id,))
+                result_user = await cur.fetchone()
+                if owner_id is not None and not result_user:
+                    owner_id = None
+                if result_user and result_user['oid']:
+                    oid = result_user['oid']
+                else:
+                    while True:
+                        oid = "".join(choice(base64) for _ in range(config.DB_OID_LENGTH))
+                        await cur.execute("SELECT 1 FROM users WHERE oid = %s", (oid,))
+                        if not await cur.fetchone():
+                            break
+
                 await cur.execute(
-                    """INSERT INTO users (id, "type", title, first_name, last_name, username, language_code, owner_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """INSERT INTO users (id, is_bot, "type", title, first_name, last_name, username, language_code, is_premium, shifted_id, "oid", owner_id, zoneinfo)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET 
+                        is_bot = EXCLUDED.is_bot,
                         "type" = EXCLUDED."type",
                         title = EXCLUDED.title,
                         first_name = EXCLUDED.first_name,
                         last_name = EXCLUDED.last_name,
                         username = EXCLUDED.username,
                         language_code = COALESCE(EXCLUDED.language_code, users.language_code),
-                        owner_id = COALESCE(EXCLUDED.owner_id, users.owner_id)
+                        is_premium = EXCLUDED.is_premium,
+                        shifted_id = EXCLUDED.shifted_id,
+                        "oid" = COALESCE(users."oid", EXCLUDED."oid"),
+                        owner_id = COALESCE(EXCLUDED.owner_id, users.owner_id),
+                        zoneinfo = COALESCE(EXCLUDED.zoneinfo, users.zoneinfo)
                     RETURNING *""",
-                    (obj_id, obj_type, title, first_name, last_name, username, language_code, owner_id)
+                    (obj_id, is_bot, obj_type, title, first_name, last_name, username, language_code, is_premium, shifted_id, oid, owner_id, zoneinfo)
                 )
                 result = await cur.fetchone()
                 await self.conn.commit()
@@ -151,9 +188,6 @@ class Database():
             return None
 
     async def user_get(self, **kwargs) -> OUser:
-        if not kwargs:
-            return None
-
         try:
             conditions = []
             params = []
@@ -174,7 +208,7 @@ class Database():
                     return None
                 return OUser(**result)
         except Exception as e:
-            print(f"database: get_user(): {e}")
+            print(f"database: user_get(): {e}")
             return None
 
     async def user_rm(self, user_id: int) -> bool:
@@ -190,4 +224,4 @@ class Database():
         except Exception as e:
             print(f"database: user_rm(): {e}")
             await self.conn.rollback()
-            return False
+            return None
