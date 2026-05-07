@@ -16,40 +16,48 @@ nonpermissions_punctuation = punctuation = r"""!"#$%&'()*+,./:;<=>?@[\]^_`{|}~ "
 
 class OKey(): # Окей :)
     def __init__(self, **kwargs):
-        self.key: str = kwargs['key']
-        self.permissions: str = kwargs['permissions']
-        self.can_create_api_keys: bool = kwargs['can_create_api_keys']
-        self.owner_id: int | None = kwargs['owner_id']
-        self.date_reg: datetime = kwargs['date_reg']
+        try:
+            self.key: str = kwargs['key']
+            self.permissions: str = kwargs['permissions']
+            self.can_create_api_keys: bool = kwargs['can_create_api_keys']
+            self.owner_id: int | None = kwargs['owner_id']
+            self.date_reg: datetime = kwargs['date_reg']
+            self.error: str | None = None
+        except Exception as e:
+            self.error: str | None = str(e)
 
 class OUser():
     def __init__(self, **kwargs):
-        self.id: int = kwargs['id']
-        self.is_bot: bool = kwargs['is_bot']
-        self.type: str = kwargs['type']
-        self.title: str | None = kwargs['title']
-        self.first_name: str | None = kwargs['first_name']
-        self.last_name: str | None = kwargs['last_name']
-        self.username: str | None = kwargs['username']
-        self.language_code: str | None = kwargs['language_code']
-        self.is_premium: bool = kwargs['is_premium']
+        try:
+            self.id: int = kwargs['id']
+            self.is_bot: bool = kwargs['is_bot']
+            self.type: str = kwargs['type']
+            self.title: str | None = kwargs['title']
+            self.first_name: str | None = kwargs['first_name']
+            self.last_name: str | None = kwargs['last_name']
+            self.username: str | None = kwargs['username']
+            self.language_code: str | None = kwargs['language_code']
+            self.is_premium: bool = kwargs['is_premium']
 
-        self.shifted_id: int = kwargs['shifted_id']
-        if self.first_name and self.last_name:
-            self.full_name: str | None = self.first_name + " " + self.last_name
-        elif self.first_name:
-            self.full_name: str | None = self.first_name
-        else:
-            self.full_name: str | None = None
-        if self.type == "private":
-            self.mention: str = f"<a href='https://t.me/{self.username}'>{self.first_name}</a>" if self.username else f"<a href='tg://openmessage?user_id={self.id}'>{self.first_name}</a>"
-        else:
-            self.mention: str = f"<a href='https://t.me/{self.username}'>{self.title}</a>" if self.username else self.title
+            self.shifted_id: int = kwargs['shifted_id']
+            if self.first_name and self.last_name:
+                self.full_name: str | None = self.first_name + " " + self.last_name
+            elif self.first_name:
+                self.full_name: str | None = self.first_name
+            else:
+                self.full_name: str | None = None
+            if self.type == "private":
+                self.mention: str = f"<a href='https://t.me/{self.username}'>{self.first_name}</a>" if self.username else f"<a href='tg://openmessage?user_id={self.id}'>{self.first_name}</a>"
+            else:
+                self.mention: str = f"<a href='https://t.me/{self.username}'>{self.title}</a>" if self.username else self.title
 
-        self.oid: str = kwargs['oid']
-        self.owner_id: int = kwargs['owner_id']
-        self.zoneinfo: str = kwargs['zoneinfo']
-        self.date_reg_db: datetime = kwargs['date_reg_db']
+            self.oid: str = kwargs['oid']
+            self.owner_id: int | None = kwargs['owner_id']
+            self.zoneinfo: str | None = kwargs['zoneinfo']
+            self.date_reg_db: datetime = kwargs['date_reg_db']
+            self.error: str | None = None
+        except Exception as e:
+            self.error: str | None = str(e)
 
 
 class DbQuery():
@@ -209,6 +217,60 @@ class DbQuery():
                 return OUser(**result)
         except Exception as e:
             print(f"database: read_user(): {e}")
+            return None
+
+    async def read_users(self, allow_None_values: bool = False, **kwargs):
+        try:
+            columns = []
+            params = []
+
+            for column, value in kwargs.items():
+                if not allow_None_values and value is None:
+                    continue
+                columns.append(sql.SQL("{} = %s").format(sql.Identifier(column)))
+                params.append(value)
+
+            query = sql.SQL("SELECT * FROM users WHERE {}").format(
+                sql.SQL(" AND ").join(columns)
+            )
+
+            async with self.conn.cursor() as cur:
+                await cur.execute(query, params)
+                users = await cur.fetchall()
+                return users
+        except Exception as e:
+            print(f"database: read_users(): {e}")
+            return None
+
+    async def read_user_chats(self, owner_id: int):
+        try:
+            async with self.conn.cursor() as cur:
+                owner = await self.read_user(id=owner_id)
+                if owner is None:
+                    return None
+                await cur.execute("SELECT * FROM users WHERE owner_id = %s", (owner_id,))
+                chats = await cur.fetchall()
+                return chats
+        except Exception as e:
+            print(f"database: read_user_chats(): {e}")
+            return None
+
+    async def update_owner_id(self, chat_id: int, new_owner_id: int):
+        try:
+            async with self.conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE users SET owner_id = %s WHERE id = %s AND owner_tid IS DISTINCT FROM %s",
+                    (new_owner_id, chat_id, new_owner_id)
+                )
+
+                if cur.rowcount == 0:
+                    return False                
+
+                await self.conn.commit()
+                return True
+        except Exception as e:
+            print(f"database: update_owner_id(): {e}")
+            await self.conn.rollback()
             return None
 
     async def delete_user(self, user_id: int) -> bool:
