@@ -2,7 +2,7 @@ from config import *
 from fastapi import HTTPException
 
 async def get_key_and_check_permission(api_key: str, required_char: str = "-"):
-    key_data = await db.key_get(api_key)
+    key_data = await db.read_key(api_key)
     if key_data is None:
         raise HTTPException(status_code=401, detail="Неверный API-ключ")
 

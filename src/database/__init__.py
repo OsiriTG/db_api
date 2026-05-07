@@ -1,1 +1,1 @@
-from .db_query import *
+from .db_query import DbQuery

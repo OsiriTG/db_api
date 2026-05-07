@@ -2,7 +2,7 @@ from dotenv import load_dotenv; load_dotenv()
 from os import getenv
 
 from zoneinfo import ZoneInfo
-from database import Database
+from database import DbQuery
 
 API_DOMAIN=getenv("API_DOMAIN", "127.0.0.1")
 API_PORT=int(getenv("API_PORT", "8000"))
@@ -18,4 +18,4 @@ DB_PASSWORD=getenv("DB_PASSWORD", "")
 DB_OID_LENGTH=int(getenv("DB_OID_LENGTH", "4"))
 
 tz = ZoneInfo("Europe/Moscow")
-db = Database()
+db = DbQuery()

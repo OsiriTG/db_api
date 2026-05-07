@@ -54,7 +54,7 @@ async def key_mk(request: KeyCreateRequest, api_key: str = Header(..., alias="X-
             detail=f"Нельзя создать ключ с правами, которых нет у Вас. Вам не хватает: {", ".join(missing_perms)}"
         )
 
-    new_key = await db.key_mk(request.permissions, request.can_create_api_keys)
+    new_key = await db.create_key(request.permissions, request.can_create_api_keys)
     if new_key is None:
         raise HTTPException(status_code=500, detail="Непредвиденная ошибка (БД)")
 
@@ -69,7 +69,7 @@ async def key_mk(request: KeyCreateRequest, api_key: str = Header(..., alias="X-
 async def key_get(target_api_key: str, sender_api_key: str = Header(..., alias="X-API-Key")):
     await get_key_and_check_permission(sender_api_key, "r")
 
-    key_data = await db.key_get(target_api_key)
+    key_data = await db.read_key(target_api_key)
     if key_data is None:
         raise HTTPException(status_code=404, detail="Ключ не найден")
 
@@ -88,7 +88,7 @@ async def user_mk(request: UserCreateRequest, api_key: str = Header(..., alias="
     tg_user = User(**request.user.model_dump()) if request.user else None
     tg_chat = Chat(**request.chat.model_dump()) if request.chat else None
 
-    user = await db.user_mk(
+    user = await db.create_user(
         user=tg_user,
         chat=tg_chat,
         owner_id=request.owner_id,
@@ -120,7 +120,7 @@ async def user_mk(request: UserCreateRequest, api_key: str = Header(..., alias="
 async def user_get(user_id: int, api_key: str = Header(..., alias="X-API-Key")):
     await get_key_and_check_permission(api_key, "r")
 
-    user = await db.user_get(id=user_id)
+    user = await db.read_user(id=user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="Не удалось найти пользователя")
 
@@ -147,7 +147,7 @@ async def user_get(user_id: int, api_key: str = Header(..., alias="X-API-Key")):
 async def user_rm(user_id: int, api_key: str = Header(..., alias="X-API-Key")):
     await get_key_and_check_permission(api_key, "d")
     
-    result = await db.user_rm(user_id)
+    result = await db.delete_user(user_id)
     if result is None:
         raise HTTPException(status_code=500, detail="Непредвиденная ошибка (БД). Попробуйте позже")
     if not result:

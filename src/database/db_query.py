@@ -52,7 +52,7 @@ class OUser():
         self.date_reg_db: datetime = kwargs['date_reg_db']
 
 
-class Database():
+class DbQuery():
     def __init__(self):
         self.conn = None
 
@@ -66,7 +66,7 @@ class Database():
             row_factory = dict_row
         )
 
-    async def key_mk(self, permissions: str = "-r--", can_create_api_keys: bool = False, owner_id: int = None) -> OKey:
+    async def create_key(self, permissions: str = "-r--", can_create_api_keys: bool = False, owner_id: int = None) -> OKey:
         if len(permissions) != 4 or not set(permissions.casefold()).issubset(set("crud-")):
             return None
         if can_create_api_keys is None:
@@ -92,11 +92,11 @@ class Database():
                 await self.conn.commit()
                 return OKey(**result)
         except Exception as e:
-            print(f"database: key_mk(): {e}")
+            print(f"database: create_key(): {e}")
             await self.conn.rollback()
             return None
 
-    async def key_get(self, key: str) -> OKey:
+    async def read_key(self, key: str) -> OKey:
         try:
             async with self.conn.cursor() as cur:
                 await cur.execute('SELECT * FROM api_keys WHERE "key" = %s', (key,))
@@ -105,11 +105,11 @@ class Database():
                     return None
                 return OKey(**result)
         except Exception as e:
-            print(f"database: key_get(): {e}")
+            print(f"database: read_key(): {e}")
             return None
 
 
-    async def user_mk(self, user: User = None, chat: Chat = None, owner_id: int = None, zoneinfo: str = None) -> OUser:
+    async def create_user(self, user: User = None, chat: Chat = None, owner_id: int = None, zoneinfo: str = None) -> OUser:
         if bool(user) == bool(chat):
             return None
 
@@ -170,7 +170,7 @@ class Database():
                         first_name = EXCLUDED.first_name,
                         last_name = EXCLUDED.last_name,
                         username = EXCLUDED.username,
-                        language_code = COALESCE(EXCLUDED.language_code, users.language_code),
+                        language_code = EXCLUDED.language_code,
                         is_premium = EXCLUDED.is_premium,
                         shifted_id = EXCLUDED.shifted_id,
                         "oid" = COALESCE(users."oid", EXCLUDED."oid"),
@@ -183,11 +183,11 @@ class Database():
                 await self.conn.commit()
                 return OUser(**result)
         except Exception as e:
-            print(f"database: user_mk(): {e}")
+            print(f"database: create_user(): {e}")
             await self.conn.rollback()
             return None
 
-    async def user_get(self, **kwargs) -> OUser:
+    async def read_user(self, **kwargs) -> OUser:
         try:
             conditions = []
             params = []
@@ -208,10 +208,10 @@ class Database():
                     return None
                 return OUser(**result)
         except Exception as e:
-            print(f"database: user_get(): {e}")
+            print(f"database: read_user(): {e}")
             return None
 
-    async def user_rm(self, user_id: int) -> bool:
+    async def delete_user(self, user_id: int) -> bool:
         try:
             async with self.conn.cursor() as cur:
                 await cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
@@ -222,6 +222,6 @@ class Database():
                 await self.conn.commit()
                 return True
         except Exception as e:
-            print(f"database: user_rm(): {e}")
+            print(f"database: delete_user(): {e}")
             await self.conn.rollback()
             return None
